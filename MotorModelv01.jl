@@ -16,7 +16,7 @@ function MotorModelv01(nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp::Float64,vw::Flo
 
   #Initialize costants
   dt = 10^-4.; #time step size (seconds)
-  totaltime = 3  #Duration of simulation  (seconds)
+  totaltime = 10  #Duration of simulation  (seconds)
   iters = dt:dt:totaltime #range of simulation
 
   fs = 5 #stall force (pN)
@@ -24,7 +24,7 @@ function MotorModelv01(nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp::Float64,vw::Flo
   fdragll = 10^ -5. #parallel drag on filament
   fdragt = 2*10^-5. #orthogonal drag on filament
   fdragr = 2*10^2. # rotational drag on filament
-  hflen = flen/2; #half the filament length
+  hflen = flen/2.0; #half the filament length
   filtdiff = sqrt(2*dt*10^5.) #translational filament diffusion coefficent
   filrdiff = sqrt(2*dt*10^-2.) #rotational filament diffusion coefficent
   mtdiff = sqrt(2*dt*4*10^6.) #motor translational diffusion coefficent
@@ -49,7 +49,10 @@ function MotorModelv01(nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp::Float64,vw::Flo
   filsyp = similar(filcyp) #y coordinate start of filament
   fileyp = similar(filcyp) #y coordinate end of filament
 
-   @inbounds for j in 1:nf #Calculate filament coordinates
+  filcxp = [0.0, 0.0]
+  filcyp = [0.0, 0.0]
+  filori = [0.0, pi/2.0]
+  for j in 1:nf #Calculate filament coordinates
     filsxp[j] = filcxp[j] - hflen * cos(filori[j])
     filsyp[j] = filcyp[j] - hflen * sin(filori[j])
     filexp[j] = filcxp[j] + flen * cos(filori[j])
@@ -74,7 +77,7 @@ function MotorModelv01(nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp::Float64,vw::Flo
   mdfc = similar(mxp) #distance from bound filament center
   moptype = similar(mxp) #opto type of motor, determines which motor pairs form
   mspeed = similar(mxp) #speed of motor, sign indicates plus or minus directed
-     @inbounds for j in 1:nm
+      for j in 1:nm
       if j<=nmpp
         moptype[j] = 1+iseven(j)
         mspeed[j] = vp*dt
@@ -100,13 +103,11 @@ function MotorModelv01(nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp::Float64,vw::Flo
   steptrigger = Int(round(timesaveresolution/dt))
   tc = 1
   hc = 1
-  println(maximum(totalindx))
   filhist[hc,:,1] = filsxp
   filhist[hc,:,2] = filsyp
   filhist[hc,:,3]  = filori
   mothist[hc,:,1] = mxp
   mothist[hc,:,2] = myp
-println(maximum(filhist[1,:,1]))
   #For calculating distance between motor pairs
   #Motor IDs
   paironeID = 0
@@ -133,7 +134,7 @@ println(maximum(filhist[1,:,1]))
   #For calulating force on filaments
   forceonfils = similar(filcxp)
 
-   for t in iters   #Begin simulation
+  for t in iters   #Begin simulation
     tc+=1
     if tc == steptrigger
       hc+=1
@@ -142,12 +143,12 @@ println(maximum(filhist[1,:,1]))
     forceonfils = zeros(Float64,nf,3)
     forceonmots = zeros(Float64,nm)
 
-     @inbounds for j in 1:numpairs #Calculate net forces on filaments due to motor pair springs
+     for j in 1:numpairs #Calculate net forces on filaments due to motor pair springs
       if mpairs[j,3] >0 && mpairs[j,4] > 0 #If motor pairs are both filament bound
         #Get motor and filament IDs
         paironeID = mpairs[j,1]
         pairtwoID = mpairs[j,2]
-        filoneID = mparis[j,3]
+        filoneID = mpairs[j,3]
         filtwoID = mpairs[j,4]
         #Calculate distance and angle between motor pairs
         sx = mxp[paironeID] - mxp[pairtwoID]
@@ -155,8 +156,8 @@ println(maximum(filhist[1,:,1]))
         l = sqrt(sx^2+sy^2)
         if l > motln
           atv = atan2(sy,sx)
-          sa1 = atv-th1
-          sa2 = atv-th2 + pi
+          sa1 = atv-filori[filoneID]
+          sa2 = atv-filori[filtwoID] + pi
           #Calculate spring force on motors
           spforce= ks * (l-motln)
 
@@ -170,40 +171,47 @@ println(maximum(filhist[1,:,1]))
           forceonfils[filtwoID,2] += spforce*sin(sa2)
           forceonfils[filoneID,3] += mdfc[paironeID] * spforce * sin(sa1)
           forceonfils[filtwoID,3] += mdfc[pairtwoID] * spforce * sin(sa2)
+
         end
       end
     end
 
-     @inbounds for j in 1:nf #Apply all forces to filaments
-      filcxp += (forceonfils[j,1]*cos(filori[j])-2*forceonfils[j,2]*sin(filori[j]))/fdragll + randn()*filtdiff
-      filcyp += (forceonfils[j,1]*sin(filori[j])-2*forceonfils[j,2]*cos(filori[j]))/fdragll + randn()*filtdiff
-      filori += forceonfils[j,3]/fdragr + randn()*filrdiff
+     for j in 1:nf #Apply all forces to filaments
+      filcxp[j] += (forceonfils[j,1]*cos(filori[j])-2*forceonfils[j,2]*sin(filori[j]))/fdragll #+ randn()*filtdiff
+      filcyp[j] += (forceonfils[j,1]*sin(filori[j])-2*forceonfils[j,2]*cos(filori[j]))/fdragll #+ randn()*filtdiff
+      filori[j] += forceonfils[j,3]/fdragr #+ randn()*filrdiff
 
       #update filament start and end points
       filsxp[j] = filcxp[j] - hflen * cos(filori[j])
       filsyp[j] = filcyp[j] - hflen * sin(filori[j])
-      filexp[j] = filcxp[j] + flen * cos(filori[j])
-      fileyp[j] = filcyp[j] + flen * sin(filori[j])
+      filexp[j] = filcxp[j] + hflen * cos(filori[j])
+      fileyp[j] = filcyp[j] + hflen * sin(filori[j])
 
       if tc == steptrigger #update filament history array
         filhist[hc,j,1] = filsxp[j]
         filhist[hc,j,2] = filsyp[j]
         filhist[hc,j,3]  = filori[j]
       end
+      sfx[j,:] = sort([filsxp[j], filexp[j]])
+      sfx[j,1] -= 100
+      sfx[j,2] += 100
+      sfy[j,:] = sort([filsyp[j], fileyp[j]])
+      sfy[j,1] -= 100
+      sfx[j,2] += 100
     end
 
     #Apply forces on motors
-     @inbounds for j in 1:nm
+     for j in 1:nm
       if mpairID[j] == 0 #single motors
         if mbfID[j] == 0 #not bound to filament
           mxp[j] += randn()*mtdiff
           myp[j] += randn()*mtdiff
           #reflect motor back if out of bounds
           if abs(mxp[j]) > maxmotloc
-            mxp[j] = maxmotloc*2.0 - mxp[j]
+            mxp[j] = sign(mxp[j])*maxmotloc*2.0 - mxp[j]
           end
           if abs(myp[j]) > maxmotloc
-            myp[j] = maxmotloc*2.0 - myp[j]
+            myp[j] = sign(myp[j])*maxmotloc*2.0 - myp[j]
           end
         else #bound to filament
           mdfc[j]+= mspeed[j]
@@ -211,8 +219,8 @@ println(maximum(filhist[1,:,1]))
           myp[j] = mdfc[j]*sin(filori[mbfID[j]])+filcyp[mbfID[j]]
         end
       else #paired motor
-        if mpairs[mpairID[j],3] == 0 && mpairs[mpairID[j],4] == 0 && mpairs[mpairID[j],1] == j #both motors not bound to filament
-          pairtwoID = view(mpairs,mpairID[j],2)
+        if mpairs[mpairID[j],1] == j && mpairs[mpairID[j],3] == 0 && mpairs[mpairID[j],4] == 0 #both motors not bound to filament
+          pairtwoID = mpairs[mpairID[j],2]
           pairdiff = randn()*mtdiff
           mxp[j]+= pairdiff
           mxp[pairtwoID]+= pairdiff
@@ -221,15 +229,23 @@ println(maximum(filhist[1,:,1]))
           myp[pairtwoID]+= pairdiff
           #reflect out of bound motor pairs
           if abs(mxp[j]) > maxmotloc
-            mxp[j] = maxmotloc*2.0 - mxp[j]
+            mpdist = 2.0*(sign(mxp[j])*maxmotloc - mxp[j])
+            mxp[j] += mpdist
+            mxp[pairtwoID] += mpdist
           end
           if abs(myp[j]) > maxmotloc
-            myp[j] = maxmotloc*2.0 - myp[j]
+            mpdist = 2.0*(sign(myp[j])*maxmotloc - myp[j])
+            myp[j] += mpdist
+            myp[pairtwoID] += mpdist
           end
-        elseif xor(mpairs[mpairID[j],3] == 0, mpairs[mpairID[j],4] == 0) && mpairs[mpairID[j],1] == j #one motor is bound
-          paironeID = view(mpairs,mpairID[j],1)
-          pairtwoID = view(mpairs,mpairID[j],2)
-          boundone = mpairs[mpairID[j],1] * (mpairs[mpairID[j],3]) + mpairs[mpairID[j],2] * (mpairs[mpairID[j],4])
+        elseif mpairs[mpairID[j],1] == j && xor(mpairs[mpairID[j],3] == 0, mpairs[mpairID[j],4] == 0) #one motor is bound
+          paironeID = mpairs[mpairID[j],1]
+          pairtwoID = mpairs[mpairID[j],2]
+          if mpairs[mpairID[j],3]>0
+            boundone = mpairs[mpairID[j],1]
+          else
+            boundone = mpairs[mpairID[j],2]
+          end
           mdfc[boundone] += mspeed[boundone]
           pairdiff = mdfc[boundone]*cos(filori[mbfID[boundone]])+filcxp[mbfID[boundone]]-mxp[boundone]
           mxp[paironeID]+= pairdiff
@@ -253,9 +269,10 @@ println(maximum(filhist[1,:,1]))
 
       if sum(masingle)>0
         activetree = BruteTree([mxp[mID[masingle]] myp[mID[masingle]]]') #KDTree of active single motor
+        treedex = mID[masingle]
       end
 
-       @inbounds for j in 1:nm
+        for j in 1:nm
         if mfree[j] #Find free motors for filament binding
           if mpairID[j] == 0
             checkxp = mxp[j]
@@ -275,41 +292,39 @@ println(maximum(filhist[1,:,1]))
           checkyp = myp[paironeID]
           end
            for p in 1:nf#check if filament is a potential partner
-            if sfx[p,1]<checkxp<sfx[p,2] && sfy[p,1]<checkyp[j]<sfy[p,2] #Check if filament is in range
-              t1,t2=circleintline(checkxp,checkyp,filsxp[p],filsyp[p],flen,filexp[p],fileyp[p],100)
+            if sfx[p,1]<checkxp<sfx[p,2] && sfy[p,1]<checkyp<sfy[p,2] #Check if filament is in range
+              t1,t2=circleintline(checkxp,checkyp,filsxp[p],filsyp[p],flen,filexp[p],fileyp[p],100.0)
               if 1> t1 > 0  #if filament is in range
                 if rand()<onrate
-                  mdfc[j] = t1*flen
-                  mxp[j] = filsxp[p] + mdfc[j]*cos(filori)
-                  myp[j] = filsyp[p] + mdfc[j]*sin(filori)
-                  mdfc[j] -= hflen
+                  mdfc[j] = t1*flen-hflen
+                  mxp[j] = filcxp[p] + mdfc[j]*cos(filori[p])
+                  myp[j] = filcyp[p] + mdfc[j]*sin(filori[p])
                   mfree[j] = 0
                   mbfID[j] = p
                   if mpairID[j] >0
                     if mpairs[mpairID[j],1] == j
-                      paironeID = 3
+                      filoneID = 3
                     else
-                      paironeID = 4
+                      filoneID = 4
                     end
-                    mpairs[mpairID[j],paironeID] = p
+                    mpairs[mpairID[j],filoneID] = p
                   end
                   break
                 end
               elseif 1>t2>0
                 if rand()<onrate
-                  mdfc[j] = t1*flen
-                  mxp[j] = filsxp[p] + mdfc[j]*cos(filori)
-                  myp[j] = filsyp[p] + mdfc[j]*sin(filori)
-                  mdfc[j] -= hflen
+                  mdfc[j] = t1*flen-hflen
+                  mxp[j] = filcxp[p] + mdfc[j]*cos(filori[p])
+                  myp[j] = filcyp[p] + mdfc[j]*sin(filori[p])
                   mfree[j] = 0
                   mbfID[j] = p
                   if mpairID[j] >0
                     if mpairs[mpairID[j],1] == j
-                      paironeID = 3
+                      filoneID = 3
                     else
-                      paironeID = 4
+                      filoneID = 4
                     end
-                    mpairs[mpairID[j],paironeID] = p
+                    mpairs[mpairID[j],filoneID] = p
                   end
                   break
                 end
@@ -323,53 +338,58 @@ println(maximum(filhist[1,:,1]))
           idxmx = inrange(activetree,mpos,110,false) #find index of nearby points at max radius
           idxmn = inrange(activetree,mpos,90,false) #find index of nearby points at min radius
           idxs = setdiff(idxmx,idxmn) #possible indices
-
-           @inbounds for i in idxs #loop over possible pair partners
-            if mpairID[i] == 0 #If motor is not already paired, pair motors
+            for i in idxs #loop over possible pair partners
+            if mpairID[treedex[i]] == 0 #If motor is not already paired, pair motors
+              boundone = treedex[i]
               masingle[j] = 0 #set motors no longer single
-              masingle[i] = 0
+              masingle[boundone] = 0
               #assign pair ID
               mpairID[j] = pairlistdex[pairlistlogical][1]
-              mpairID[i] = mpairID[j]
+              mpairID[boundone] = mpairID[j]
               #Remove pair from available ID list
               pairlistlogical[mpairID[j]] = 0
+              if boundone == j
+                println(idxmx)
+                println(idxmn)
+                println(idxs)
+                barf
+              end
               #Update mpairs vector
               mpairs[mpairID[j],1] = j
-              mpairs[mpairID[j],2] = i
+              mpairs[mpairID[j],2] = boundone
               mpairs[mpairID[j],3] = mbfID[j]
-              mpairs[mpairID[j],4] = mbfID[i]
+              mpairs[mpairID[j],4] = mbfID[boundone]
               break
             end
           end
         end
         if !mfree[j] #motors that are filament bound, see if they unbind
-          if mdfc >= hflen || (rand() < offrate) #motors at end of filament fall off
+          if mdfc[j] >= hflen || (rand() < offrate) #motors at end of filament fall off
             mfree[j] = 1
             mbfID[j] = 0
             if mpairID[j] >0
               if mpairs[mpairID[j],1] == j
-                paironeID = 3
+                filoneID = 3
               else
-                paironeID = 4
+                filoneID = 4
               end
-              mpairs[mpairID[j],paironeID] = 0
+              mpairs[mpairID[j],filoneID] = 0
             end
-          elseif rand() < offrate*exp(forceonmots/2.5) #koff of motors from filaments
+          elseif rand() < offrate*exp(forceonmots[j]/2.5) #koff of motors from filaments
             mfree[j] = 1
             mbfID[j] = 0
             if mpairID[j] >0
               if mpairs[mpairID[j],1] == j
-                paironeID = 3
+                filoneID = 3
               else
-                paironeID = 4
+                filoneID = 4
               end
-              mpairs[mpairID[j],paironeID] = 0
+              mpairs[mpairID[j],filoneID] = 0
             end
           end
         end
       end
     if tc == steptrigger
-      println(maximum(filhist[1,:,1]))
       tc = 0
     end
   end
@@ -382,11 +402,17 @@ end
 
 
   function circleintline(xm::Float64,ym::Float64,xs::Float64,ys::Float64,l::Float64,xe::Float64,ye::Float64,r::Float64)
-  a = l^2
-  b = 2*(xe-xs)*(xs-xm) + 2*(ye-ys)*(ys-ym)
-  c = (xs - xm)^2 + (ys - ym)^2 - r^2
+  a = l^2.0
+  b = 2.0*(xe-xs)*(xs-xm) + 2.0*(ye-ys)*(ys-ym)
+  c = (xs - xm)^2.0 + (ys - ym)^2.0 - r^2.0
+  disc = (b)^2.0-4.0*a*c
+  if disc >=0
+    t1 = 2.0*c/(-b+sqrt(disc))
+    t2 = 2.0*c/(-b-sqrt(disc))
+  else
+    t1 = -1
+    t2 = -1
+  end
 
-  t1 = 2*c/(-b+sqrt(b^2-4*a*c))
-  t2 = 2*c/(-b-sqrt(b^2-4*a*c))
   return t1,t2
   end
