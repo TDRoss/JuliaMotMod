@@ -1,6 +1,7 @@
 using MAT
 using NearestNeighbors
-function MotorModelv01(nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp::Float64,vw::Float64,vn::Float64,flen::Float64,motln::Float64,boundlen::Float64,koff::Float64,kon::Float64)
+function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp::Float64,vw::Float64,vn::Float64,flen::Float64,motln::Float64,boundlen::Float64,koff::Float64,kon::Float64)
+#outname = string for output file
 #nmpp = number of positive-positive motor pairs
 #nmpw = number of positive-wild motor pairs
 #nmnn = number of negative-negative motor pairs
@@ -14,29 +15,30 @@ function MotorModelv01(nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp::Float64,vw::Flo
 #koff = motor-filament off rate
 #kon = motor-filament on rate
 dbg = 0
+  skiptime = 100
   #Initialize costants
-  dt = 10^-4.; #time step size (seconds)
-  totaltime = 10  #Duration of simulation  (seconds)
+  dt = 10^-5.; #time step size (seconds)
+  totaltime = 40  #Duration of simulation  (seconds)
   iters = dt:dt:totaltime #range of simulation
 
   fs = 5 #stall force (pN)
   ks = 0.01 #spring constant (pN/nm)
-  fdragll = 10^ -5. #parallel drag on filament
+  fdragll = 10^ -4. #parallel drag on filament
   fdragt = 2*10^-5. #orthogonal drag on filament
   fdragr = 2*10^2. # rotational drag on filament
   hflen = flen/2.0; #half the filament length
-  filtdiff = sqrt(2*dt*10^5.) #translational filament diffusion coefficent
+  filtdiff = sqrt(2*dt*10^4.) #translational filament diffusion coefficent
   filrdiff = sqrt(2*dt*10^-2.) #rotational filament diffusion coefficent
   mtdiff = sqrt(2*dt*4*10^6.) #motor translational diffusion coefficent
-  offrate = dt*koff
-  onrate = dt*kon
+  offrate = skiptime*dt*koff
+  onrate = skiptime*dt*kon
 
   nm = nmpp+nmpw+nmnn #total number of motors in the system
   maxmotloc = boundlen + flen #upper boundary limit on motor position
   minmotloc = -maxmotloc #lower boundary limit on motor position
 
   filbound = boundlen*2 #Boundary for filament generation
-  motbound = (boundlen + flen)*2 #Boundary for motor generation
+  motbound = (boundlen + flen)*2#Boundary for motor generation
 
 
   #Initialize filaments
@@ -78,7 +80,21 @@ dbg = 0
   mdfc = similar(mxp) #distance from bound filament center
   moptype = similar(mxp) #opto type of motor, determines which motor pairs form
   mspeed = similar(mxp) #speed of motor, sign indicates plus or minus directed
+
+  #make motors start out in pairs
+  pc = 1
       @inbounds for j in 1:nm
+      #make motors start out in pairs
+      mpairs[pc,1+iseven(j)] = j
+      mpairID[j] = pc
+      masingle[j] = 0
+      pairlistlogical[pc] = 0
+      pc+=iseven(j)
+      if iseven(j)
+        mxp[j] = mxp[j-1]+100
+        myp[j] = myp[j-1]
+      end
+
       if j<=nmpp
         moptype[j] = 1+iseven(j)
         mspeed[j] = vp*dt
@@ -106,11 +122,12 @@ dbg = 0
   # mpairID =[1,1]
 
   #Store histories of motor and filament positions
-  timesaveresolution = 1 #time resolution of output array (seconds)
+  timesaveresolution = .1 #time resolution of output array (seconds)
   indxstep = Int(round(timesaveresolution/dt)) #index for when to save history
   totalindx = Int(floor(length(iters)/indxstep))+1
   filhist = zeros(totalindx,nf,3) #sxp,syp,ori
-  mothist = zeros(totalindx,nm,2) #xp,yp
+  mothist = zeros(totalindx,nm,3) #xp,yp,filament ID
+  forcehist = zeros(totalindx,nf,3,2) #xf,yf,rf last dimension is motor generated/random forces
   steptrigger = Int(round(timesaveresolution/dt))
   tc = 1
   hc = 1
@@ -136,6 +153,7 @@ dbg = 0
   sa2 = 0.0
   #spring force on motors
   spforce = 0.0
+  randforce = zeros(Float64, 3)
 
   pairdiff = 0.0 #For calculating diffusion on free motor pairs
   boundone = 0 #holds the id of the bound motor in a motor pair
@@ -144,8 +162,9 @@ dbg = 0
   sfy = zeros(Float64,nf,2) #sorted filament y start and end point
   #For calulating force on filaments
   forceonfils = similar(filcxp)
-
+  skc = 0
 @inbounds  for t in iters   #Begin simulation
+    skc+=1
     tc+=1
     if tc == steptrigger
       hc+=1
@@ -188,10 +207,12 @@ dbg = 0
       end
     end
 
+
      @inbounds for j in 1:nf #Apply all forces to filaments
-      filcxp[j] += dt*(forceonfils[j,1]*cos(filori[j])/fdragll-forceonfils[j,2]*sin(filori[j])/fdragt) + randn()*filtdiff
-      filcyp[j] += dt*(forceonfils[j,1]*sin(filori[j])/fdragll+forceonfils[j,2]*cos(filori[j])/fdragt) + randn()*filtdiff
-      filori[j] += dt*forceonfils[j,3]/fdragr #+ randn()*filrdiff
+      randforce = randn(3)
+      filcxp[j] += dt*(forceonfils[j,1]*cos(filori[j])/fdragll-forceonfils[j,2]*sin(filori[j])/fdragt) + randforce[1]*filtdiff
+      filcyp[j] += dt*(forceonfils[j,1]*sin(filori[j])/fdragll+forceonfils[j,2]*cos(filori[j])/fdragt) + randforce[2]*filtdiff
+      filori[j] += dt*forceonfils[j,3]/fdragr + randforce[3]*filrdiff
 
       #update filament start and end points
       filsxp[j] = filcxp[j] - hflen * cos(filori[j])
@@ -204,6 +225,9 @@ dbg = 0
         filhist[hc,j,1] = filsxp[j]
         filhist[hc,j,2] = filsyp[j]
         filhist[hc,j,3]  = filori[j]
+        forcehist[hc,j,1,1] = forceonfils[j,1]
+        forcehist[hc,j,2,1] = forceonfils[j,2]
+        forcehist[hc,j,3,1] = forceonfils[j,3]
       end
       sfx[j,:] = sort([filsxp[j], filexp[j]])
       sfx[j,1] -= 100
@@ -277,139 +301,147 @@ dbg = 0
       if tc == steptrigger #update motor history array
         mothist[hc,j,1] = mxp[j]
         mothist[hc,j,2] = myp[j]
+        mothist[hc,j,3] = mbfID[j]
       end
     end
 
-      @inbounds for j in 1:nm
-        if mfree[j] #Find free motors for filament binding
-          if mpairID[j] == 0 #single motors
-            checkxp = mxp[j]
-            checkyp = myp[j]
-          elseif mpairs[mpairID[j],3] == 0 && mpairs[mpairID[j],4] == 0 #free pair
-            paironeID = mpairs[mpairID[j],1]
-            pairtwoID = mpairs[mpairID[j],2]
-            checkxp = (mxp[paironeID]+mxp[pairtwoID])/2.0
-            checkyp = (myp[paironeID]+myp[pairtwoID])/2.0
-          else #motor is part of pair with one filament bound
-            if mpairs[mpairID[j],3] >0 #Get ID of bound motor, use that as center of binding radius
+      if skc==skiptime
+        @inbounds for j in 1:nm
+          if mfree[j] #Find free motors for filament binding
+            boundone = 0
+            if mpairID[j] == 0 #single motors
+              checkxp = mxp[j]
+              checkyp = myp[j]
+            elseif mpairs[mpairID[j],3] == 0 && mpairs[mpairID[j],4] == 0 #free pair
               paironeID = mpairs[mpairID[j],1]
-            else
-              paironeID = mpairs[mpairID[j],2]
+              pairtwoID = mpairs[mpairID[j],2]
+              checkxp = (mxp[paironeID]+mxp[pairtwoID])/2.0
+              checkyp = (myp[paironeID]+myp[pairtwoID])/2.0
+            else #motor is part of pair with one filament bound
+              if mpairs[mpairID[j],3] >0 #Get ID of bound motor, use that as center of binding radius
+                paironeID = mpairs[mpairID[j],1]
+                boundone = mpairs[mpairID[j],3]
+              else
+                paironeID = mpairs[mpairID[j],2]
+                boundone = mpairs[mpairID[j],4]
+              end
+            checkxp = mxp[paironeID]
+            checkyp = myp[paironeID]
             end
-          checkxp = mxp[paironeID]
-          checkyp = myp[paironeID]
+             @inbounds for p in 1:nf#check if filament is a potential partner
+              if sfx[p,1]<checkxp<sfx[p,2] && sfy[p,1]<checkyp<sfy[p,2] && boundone != p #Check if filament is in range and exclude motor pairs binding to same filament
+                t1,t2=circleintline(checkxp,checkyp,filsxp[p],filsyp[p],flen,filexp[p],fileyp[p],100.0)
+                if 1> t1 > 0  #if filament is in range
+                  if rand()<onrate
+                    mdfc[j] = t1*flen-hflen
+                    mxp[j] = filcxp[p] + mdfc[j]*cos(filori[p])
+                    myp[j] = filcyp[p] + mdfc[j]*sin(filori[p])
+                    mfree[j] = 0
+                    mbfID[j] = p
+                    if mpairID[j] >0
+                      if mpairs[mpairID[j],1] == j
+                        filoneID = 3
+                      else
+                        filoneID = 4
+                      end
+                      mpairs[mpairID[j],filoneID] = p
+                    end
+                    break
+                  end
+                elseif 1>t2>0
+                  if rand()<onrate
+                    mdfc[j] = t1*flen-hflen
+                    mxp[j] = filcxp[p] + mdfc[j]*cos(filori[p])
+                    myp[j] = filcyp[p] + mdfc[j]*sin(filori[p])
+                    mfree[j] = 0
+                    mbfID[j] = p
+                    if mpairID[j] >0
+                      if mpairs[mpairID[j],1] == j
+                        filoneID = 3
+                      else
+                        filoneID = 4
+                      end
+                      mpairs[mpairID[j],filoneID] = p
+                    end
+                    break
+                  end
+                end
+              end
+            end
           end
-           @inbounds for p in 1:nf#check if filament is a potential partner
-            if sfx[p,1]<checkxp<sfx[p,2] && sfy[p,1]<checkyp<sfy[p,2] #Check if filament is in range
-              t1,t2=circleintline(checkxp,checkyp,filsxp[p],filsyp[p],flen,filexp[p],fileyp[p],100.0)
-              if 1> t1 > 0  #if filament is in range
-                if rand()<onrate
-                  mdfc[j] = t1*flen-hflen
-                  mxp[j] = filcxp[p] + mdfc[j]*cos(filori[p])
-                  myp[j] = filcyp[p] + mdfc[j]*sin(filori[p])
-                  mfree[j] = 0
-                  mbfID[j] = p
-                  if mpairID[j] >0
-                    if mpairs[mpairID[j],1] == j
-                      filoneID = 3
-                    else
-                      filoneID = 4
-                    end
-                    mpairs[mpairID[j],filoneID] = p
-                  end
-                  break
+
+          if !mfree[j] #motors that are filament bound, see if they unbind
+            if mdfc[j] >= hflen || (rand() < offrate) #motors at end of filament fall off
+              mfree[j] = 1
+              mbfID[j] = 0
+              dbg = 1
+              if mpairID[j] >0
+                if mpairs[mpairID[j],1] == j
+                  filoneID = 3
+                else
+                  filoneID = 4
                 end
-              elseif 1>t2>0
-                if rand()<onrate
-                  mdfc[j] = t1*flen-hflen
-                  mxp[j] = filcxp[p] + mdfc[j]*cos(filori[p])
-                  myp[j] = filcyp[p] + mdfc[j]*sin(filori[p])
-                  mfree[j] = 0
-                  mbfID[j] = p
-                  if mpairID[j] >0
-                    if mpairs[mpairID[j],1] == j
-                      filoneID = 3
-                    else
-                      filoneID = 4
-                    end
-                    mpairs[mpairID[j],filoneID] = p
-                  end
-                  break
+                mpairs[mpairID[j],filoneID] = 0
+              end
+            elseif rand() < offrate*exp(forceonmots[j]/2.5) #koff of motors from filaments
+              mfree[j] = 1
+              mbfID[j] = 0
+              if mpairID[j] >0
+                if mpairs[mpairID[j],1] == j
+                  filoneID = 3
+                else
+                  filoneID = 4
                 end
+                mpairs[mpairID[j],filoneID] = 0
               end
             end
           end
         end
 
-        if !mfree[j] #motors that are filament bound, see if they unbind
-          if mdfc[j] >= hflen || (rand() < offrate) #motors at end of filament fall off
-            mfree[j] = 1
-            mbfID[j] = 0
-            dbg = 1
-            if mpairID[j] >0
-              if mpairs[mpairID[j],1] == j
-                filoneID = 3
-              else
-                filoneID = 4
-              end
-              mpairs[mpairID[j],filoneID] = 0
-            end
-          elseif rand() < offrate*exp(forceonmots[j]/2.5) #koff of motors from filaments
-            mfree[j] = 1
-            mbfID[j] = 0
-            if mpairID[j] >0
-              if mpairs[mpairID[j],1] == j
-                filoneID = 3
-              else
-                filoneID = 4
-              end
-              mpairs[mpairID[j],filoneID] = 0
+      if sum(masingle)>0 #make tree if single motors are available for pairing
+        activetree = BruteTree([mxp[mID[masingle]] myp[mID[masingle]]]') #KDTree of active single motor
+        treedex = mID[masingle]
+      end
+
+      @inbounds for j in 1:nm #loop over motors for pairing
+        if masingle[j] == 1 && mpairID[j] == 0  #Find active motors that are available for pairing
+          mpos = [mxp[j], myp[j]] #holds coordinate of current motor
+          idxmx = inrange(activetree,mpos,110,false) #find index of nearby points at max radius
+          idxmn = inrange(activetree,mpos,90,false) #find index of nearby points at min radius
+          idxs = setdiff(idxmx,idxmn) #possible indices
+          @inbounds for i in idxs #loop over possible pair partners
+            if mpairID[treedex[i]] == 0 && (mbfID[j]==0 || mbfID[treedex[i]]==0 || mbfID[j] != mbfID[treedex[i]]) #If motor is not already paired or on same filament, pair motors
+              boundone = treedex[i]
+              masingle[j] = 0 #set motors no longer single
+              masingle[boundone] = 0
+              #assign pair ID
+              mpairID[j] = pairlistdex[pairlistlogical][1]
+              mpairID[boundone] = mpairID[j]
+              #Remove pair from available ID list
+              pairlistlogical[mpairID[j]] = 0
+              #Update mpairs vector
+              mpairs[mpairID[j],1] = j
+              mpairs[mpairID[j],2] = boundone
+              mpairs[mpairID[j],3] = mbfID[j]
+              mpairs[mpairID[j],4] = mbfID[boundone]
+              break
             end
           end
         end
       end
-
-    if sum(masingle)>0 #make tree if single motors are available for pairing
-      activetree = BruteTree([mxp[mID[masingle]] myp[mID[masingle]]]') #KDTree of active single motor
-      treedex = mID[masingle]
-    end
-
-    @inbounds for j in 1:nm #loop over motors for pairing
-      if masingle[j] == 1 && mpairID[j] == 0  #Find active motors that are available for pairing
-        mpos = [mxp[j], myp[j]] #holds coordinate of current motor
-        idxmx = inrange(activetree,mpos,110,false) #find index of nearby points at max radius
-        idxmn = inrange(activetree,mpos,90,false) #find index of nearby points at min radius
-        idxs = setdiff(idxmx,idxmn) #possible indices
-        @inbounds for i in idxs #loop over possible pair partners
-          if mpairID[treedex[i]] == 0 #If motor is not already paired, pair motors
-            boundone = treedex[i]
-            masingle[j] = 0 #set motors no longer single
-            masingle[boundone] = 0
-            #assign pair ID
-            mpairID[j] = pairlistdex[pairlistlogical][1]
-            mpairID[boundone] = mpairID[j]
-            #Remove pair from available ID list
-            pairlistlogical[mpairID[j]] = 0
-            #Update mpairs vector
-            mpairs[mpairID[j],1] = j
-            mpairs[mpairID[j],2] = boundone
-            mpairs[mpairID[j],3] = mbfID[j]
-            mpairs[mpairID[j],4] = mbfID[boundone]
-            break
-          end
-        end
-      end
-    end
+    skc = 0
+  end
 
     if tc == steptrigger
       tc = 0
     end
   end
-    file = matopen("MotorTest01.mat","w")
+    file = matopen(outname,"w")
     write(file,"filhist",filhist)
     write(file,"mothist",mothist)
+    write(file,"forcehist",forcehist)
     close(file)
-    return mothist, filhist
+    # return mothist, filhist
 end
 
 
