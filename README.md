@@ -1,4 +1,4 @@
 # JuliaMotMod
 
 Example input:
-mothist, filhist = MotorModelv01(800,0,0,100,800.0,0.0,-800.0,10000.0,100.0,500.0,.01,5.0);
+MotorModelv01("AsterFormation.mat",800,0,0,50,800.0,0.0,-800.0,10000.0,100.0,5000.0,.5,5.0);
