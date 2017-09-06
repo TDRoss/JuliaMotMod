@@ -17,14 +17,14 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
 
 
   #Initialize costants
-  dt = 10^(-5.); #time step size (seconds)
-  skiptime = Int(floor(10^(-3.)/dt)) #time between collision detection events
-  totaltime = 100.0  #Duration of simulation  (seconds)
+  dt = 0.5*10^(-4.); #time step size (seconds)
+  skiptime = Int(floor(5*10^(-2.)/dt)) #time between collision detection events
+  totaltime = 300.0  #Duration of simulation  (seconds)
   iters = dt:dt:totaltime #range of simulation
 
   fs = 5 #stall force (pN)
   ks = 0.001 #spring constant (pN/nm)
-  fdragll = 10^ -4. #parallel drag on filament
+  fdragll = 10^-4. #parallel drag on filament
   fdragt = 2*10^-5. #orthogonal drag on filament
   fdragr = 2*10^2. # rotational drag on filament
   hflen = flen/2.0; #half the filament length
@@ -52,7 +52,7 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
   filsyp = similar(filcyp) #y coordinate start of filament
   fileyp = similar(filcyp) #y coordinate end of filament
 
-  # #For testing two filaments
+  #For testing two filaments
   # filcxp = [0.0, 0.0]
   # filcyp = [0.0, 0.0]
   # filori = [0.0, pi/2.0]
@@ -75,7 +75,7 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
 
   mpairs = zeros(Int,numpairs,4) #Index of motor pairs, index 3 and 4 point to motor mbfID
   activetimer = zeros(Int,nm) #stores remaining time of motor pairing activation
-  timeactive = Int(floor(5/(skiptime*dt))) #activation length for motor pairing
+  timeactive = Int(3) #activation length for motor pairing
   mxp = rand(nm)*motbound - motbound/2 #x coordinate of motor
   myp = rand(nm)*motbound - motbound/2 #y coordinate of motor
   mdfc = similar(mxp) #distance from bound filament center
@@ -163,8 +163,9 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
   #holds stochastic forces applied to filaments
   randforce = zeros(Float64, 3)
   #Active region positions
-  actreg = [-1.5*flen -hflen -flen flen; hflen 1.5*flen -flen flen ] #xs xe ys ye; region 2
-  # actreg = [-flen flen -flen flen;-flen flen -flen flen]
+  actreg = [-5*flen -1.2*hflen -5*flen 5*flen; 1.2*hflen 5*flen -5*flen 5*flen]  #xs xe ys ye; region 2
+  linkreg = [-5*flen 5*flen -hflen hflen]
+  # actreg = [-10*flen 10*flen -10*flen 10*flen;-10*flen 10*flen -10*flen 10*flen]
 
   pairdiff = 0.0 #For calculating diffusion on free motor pairs
   boundone = 0 #holds the id of the bound motor in a motor pair
@@ -223,9 +224,9 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
 
      @inbounds for j in 1:nf #Apply all forces to filaments
       # randforce = randn(3)
-      filcxp[j] += dt*(forceonfils[j,1]*cos(filori[j])/fdragll-forceonfils[j,2]*sin(filori[j])/fdragt) + randn()*filtdiff
-      filcyp[j] += dt*(forceonfils[j,1]*sin(filori[j])/fdragll+forceonfils[j,2]*cos(filori[j])/fdragt) + randn()*filtdiff
-      filori[j] += dt*forceonfils[j,3]/fdragr + randn()*filrdiff
+      filcxp[j] += dt*(forceonfils[j,1]*cos(filori[j])/fdragll-forceonfils[j,2]*sin(filori[j])/fdragt) #+ randn()*filtdiff
+      filcyp[j] += dt*(forceonfils[j,1]*sin(filori[j])/fdragll+forceonfils[j,2]*cos(filori[j])/fdragt) #+ randn()*filtdiff
+      filori[j] += dt*forceonfils[j,3]/fdragr #+ randn()*filrdiff
 
       #update filament start and end points
       filsxp[j] = filcxp[j] - hflen * cos(filori[j])
@@ -335,9 +336,9 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
             activetimer[j] -= 1
           end
           #Check if motor is in active region
-          if (actreg[1,1]<mxp[j]<actreg[1,2] && actreg[1,3]<myp[j]<actreg[1,4]) || (actreg[2,1]<mxp[j]<actreg[2,2] && actreg[2,3]<myp[j]<actreg[2,4])
+          if (actreg[1,1]<mxp[j]<actreg[1,2] && actreg[1,3]<myp[j]<actreg[1,4]) || (actreg[2,1]<mxp[j]<actreg[2,2] && actreg[2,3]<myp[j]<actreg[2,4]) || (t>100.0 && linkreg[1]<mxp[j]<linkreg[2] && linkreg[3]<myp[j]<linkreg[4])
             activetimer[j] = timeactive
-            if mpairID == 0
+            if mpairID[j] == 0
               masingle[j] = 1
             end
           end
@@ -351,7 +352,7 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
                 masingle[paironeID] = 1
               end
               mpairs[mpairID[j],:] = 0
-              pairlistlogical[mpairID] = 1
+              pairlistlogical[mpairID[j]] = 1
               mpairID[paironeID] = 0
               mpairID[pairtwoID] = 0
             end
@@ -471,6 +472,7 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
               masingle[boundone] = 0
               #assign pair ID
               mpairID[j] = pairlistdex[pairlistlogical][1]
+
               mpairID[boundone] = mpairID[j]
               #Remove pair from available ID list
               pairlistlogical[mpairID[j]] = 0
