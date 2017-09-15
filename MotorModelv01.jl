@@ -17,19 +17,19 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
 
 
   #Initialize costants
-  dt = 0.5*10^(-4.); #time step size (seconds)
+  dt = 0.5*10^(-5.); #time step size (seconds)
   skiptime = Int(floor(5*10^(-2.)/dt)) #time between collision detection events
-  totaltime = 300.0  #Duration of simulation  (seconds)
+  totaltime = 20.0  #Duration of simulation  (seconds)
   iters = dt:dt:totaltime #range of simulation
 
   fs = 5 #stall force (pN)
-  ks = 0.001 #spring constant (pN/nm)
-  fdragll = 10^-4. #parallel drag on filament
+  ks = 0.1 #spring constant (pN/nm)
+  fdragll = 10^-5. #parallel drag on filament
   fdragt = 2*10^-5. #orthogonal drag on filament
   fdragr = 2*10^2. # rotational drag on filament
   hflen = flen/2.0; #half the filament length
-  filtdiff = sqrt(2*dt*10^4.) #translational filament diffusion coefficent
-  filrdiff = sqrt(2*dt*10^-2.) #rotational filament diffusion coefficent
+  filtdiff = sqrt(2*dt*2*10^5.) #translational filament diffusion coefficent
+  filrdiff = sqrt(2*dt*2*10^-2.) #rotational filament diffusion coefficent
   mtdiff = sqrt(2*dt*4*10^6.) #motor translational diffusion coefficent
   offrate = skiptime*dt*koff
   onrate = skiptime*dt*kon
@@ -51,16 +51,20 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
   filexp = similar(filcxp) #x coordinate end of filament
   filsyp = similar(filcyp) #y coordinate start of filament
   fileyp = similar(filcyp) #y coordinate end of filament
+  filcos = similar(filcxp) #cos of filament angle
+  filsin = similar(filcyp) #sin of filament angle
 
-  #For testing two filaments
+  # For testing two filaments
   # filcxp = [0.0, 0.0]
   # filcyp = [0.0, 0.0]
   # filori = [0.0, pi/2.0]
   @inbounds for j in 1:nf #Calculate filament coordinates
-    filsxp[j] = filcxp[j] - hflen * cos(filori[j])
-    filsyp[j] = filcyp[j] - hflen * sin(filori[j])
-    filexp[j] = filcxp[j] + flen * cos(filori[j])
-    fileyp[j] = filcyp[j] + flen * sin(filori[j])
+    filcos[j] = cos(filori[j])
+    filsin[j] = sin(filori[j])
+    filsxp[j] = filcxp[j] - hflen * filcos[j]
+    filsyp[j] = filcyp[j] - hflen * filsin[j]
+    filexp[j] = filcxp[j] + flen * filcos[j]
+    fileyp[j] = filcyp[j] + flen * filsin[j]
   end
 
   #Initalize motors
@@ -163,9 +167,9 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
   #holds stochastic forces applied to filaments
   randforce = zeros(Float64, 3)
   #Active region positions
-  actreg = [-5*flen -1.2*hflen -5*flen 5*flen; 1.2*hflen 5*flen -5*flen 5*flen]  #xs xe ys ye; region 2
+  # actreg = [-5*flen hflen -5*flen 5*flen; flen 5*flen -5*flen 5*flen]  #xs xe ys ye; region 2
   linkreg = [-5*flen 5*flen -hflen hflen]
-  # actreg = [-10*flen 10*flen -10*flen 10*flen;-10*flen 10*flen -10*flen 10*flen]
+  actreg = [-10*flen 10*flen -10*flen 10*flen;-10*flen 10*flen -10*flen 10*flen]
 
   pairdiff = 0.0 #For calculating diffusion on free motor pairs
   boundone = 0 #holds the id of the bound motor in a motor pair
@@ -224,15 +228,17 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
 
      @inbounds for j in 1:nf #Apply all forces to filaments
       # randforce = randn(3)
-      filcxp[j] += dt*(forceonfils[j,1]*cos(filori[j])/fdragll-forceonfils[j,2]*sin(filori[j])/fdragt) #+ randn()*filtdiff
-      filcyp[j] += dt*(forceonfils[j,1]*sin(filori[j])/fdragll+forceonfils[j,2]*cos(filori[j])/fdragt) #+ randn()*filtdiff
+      filcxp[j] += dt*(forceonfils[j,1]*filcos[j]/fdragll-forceonfils[j,2]*filsin[j]/fdragt) #+ randn()*filtdiff
+      filcyp[j] += dt*(forceonfils[j,1]*filsin[j]/fdragll+forceonfils[j,2]*filcos[j]/fdragt) #+ randn()*filtdiff
       filori[j] += dt*forceonfils[j,3]/fdragr #+ randn()*filrdiff
 
       #update filament start and end points
-      filsxp[j] = filcxp[j] - hflen * cos(filori[j])
-      filsyp[j] = filcyp[j] - hflen * sin(filori[j])
-      filexp[j] = filcxp[j] + hflen * cos(filori[j])
-      fileyp[j] = filcyp[j] + hflen * sin(filori[j])
+      filcos[j] = cos(filori[j])
+      filsin[j] = sin(filori[j])
+      filsxp[j] = filcxp[j] - hflen * filcos[j]
+      filsyp[j] = filcyp[j] - hflen * filsin[j]
+      filexp[j] = filcxp[j] + hflen * filcos[j]
+      fileyp[j] = filcyp[j] + hflen * filsin[j]
 
 
       if tc == steptrigger #update filament history array
@@ -245,14 +251,14 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
       end
       if skc == skiptime
         #Get sorted filament start and end points, used for collision detection with motors
-        if cos(filori[j])>0
+        if filcos[j]>0
           sfx[j,1] = filsxp[j] - 100
           sfx[j,2] = filexp[j] + 100
         else
           sfx[j,1] = filexp[j] - 100
           sfx[j,2] = filsxp[j] + 100
         end
-        if sin(filori[j])>0
+        if filsin[j]>0
           sfy[j,1] = filsyp[j] - 100
           sfy[j,2] = fileyp[j] + 100
         else
@@ -277,8 +283,8 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
           end
         else #bound to filament
           mdfc[j]+= mspeed[j]
-          mxp[j] = mdfc[j]*cos(filori[mbfID[j]])+filcxp[mbfID[j]]
-          myp[j] = mdfc[j]*sin(filori[mbfID[j]])+filcyp[mbfID[j]]
+          mxp[j] = mdfc[j]*filcos[mbfID[j]]+filcxp[mbfID[j]]
+          myp[j] = mdfc[j]*filsin[mbfID[j]]+filcyp[mbfID[j]]
         end
       else #paired motor
         if mpairs[mpairID[j],1] == j && mpairs[mpairID[j],3] == 0 && mpairs[mpairID[j],4] == 0 #both motors not bound to filament
@@ -309,18 +315,18 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
             boundone = mpairs[mpairID[j],2]
           end
           mdfc[boundone] += mspeed[boundone]
-          pairdiff = mdfc[boundone]*cos(filori[mbfID[boundone]])+filcxp[mbfID[boundone]]-mxp[boundone]
+          pairdiff = mdfc[boundone]*filcos[mbfID[boundone]]+filcxp[mbfID[boundone]]-mxp[boundone]
           mxp[paironeID]+= pairdiff
           mxp[pairtwoID]+= pairdiff
-          pairdiff = mdfc[boundone]*sin(filori[mbfID[boundone]])+filcyp[mbfID[boundone]]-myp[boundone]
+          pairdiff = mdfc[boundone]*filsin[mbfID[boundone]]+filcyp[mbfID[boundone]]-myp[boundone]
           myp[paironeID]+= pairdiff
           myp[pairtwoID]+= pairdiff
         elseif   mpairs[mpairID[j],3] >0 && mpairs[mpairID[j],4] >0  #both motors in pair bound to filament
           if forceonmots[j] < fs
             mdfc[j]+= mspeed[j]*(1-forceonmots[j]/fs)
           end
-          mxp[j] = mdfc[j]*cos(filori[mbfID[j]])+filcxp[mbfID[j]]
-          myp[j] = mdfc[j]*sin(filori[mbfID[j]])+filcyp[mbfID[j]]
+          mxp[j] = mdfc[j]*filcos[mbfID[j]]+filcxp[mbfID[j]]
+          myp[j] = mdfc[j]*filsin[mbfID[j]]+filcyp[mbfID[j]]
         end
       end
       if tc == steptrigger #update motor history array
@@ -336,7 +342,7 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
             activetimer[j] -= 1
           end
           #Check if motor is in active region
-          if (actreg[1,1]<mxp[j]<actreg[1,2] && actreg[1,3]<myp[j]<actreg[1,4]) || (actreg[2,1]<mxp[j]<actreg[2,2] && actreg[2,3]<myp[j]<actreg[2,4]) || (t>100.0 && linkreg[1]<mxp[j]<linkreg[2] && linkreg[3]<myp[j]<linkreg[4])
+          if (actreg[1,1]<mxp[j]<actreg[1,2] && actreg[1,3]<myp[j]<actreg[1,4]) || (actreg[2,1]<mxp[j]<actreg[2,2] && actreg[2,3]<myp[j]<actreg[2,4]) || (t>140.0 && linkreg[1]<mxp[j]<linkreg[2] && linkreg[3]<myp[j]<linkreg[4])
             activetimer[j] = timeactive
             if mpairID[j] == 0
               masingle[j] = 1
@@ -385,8 +391,8 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
                 if 1.0> t1 > 0.0  #if filament is in range
                   if rand()<onrate
                     mdfc[j] = t1*flen-hflen
-                    mxp[j] = filcxp[p] + mdfc[j]*cos(filori[p])
-                    myp[j] = filcyp[p] + mdfc[j]*sin(filori[p])
+                    mxp[j] = filcxp[p] + mdfc[j]*filcos[p]
+                    myp[j] = filcyp[p] + mdfc[j]*filsin[p]
                     mfree[j] = 0
                     mbfID[j] = p
                     if mpairID[j] >0
@@ -402,8 +408,8 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
                 elseif 1.0>t2>0.0
                   if rand()<onrate
                     mdfc[j] = t1*flen-hflen
-                    mxp[j] = filcxp[p] + mdfc[j]*cos(filori[p])
-                    myp[j] = filcyp[p] + mdfc[j]*sin(filori[p])
+                    mxp[j] = filcxp[p] + mdfc[j]*filcos[p]
+                    myp[j] = filcyp[p] + mdfc[j]*filsin[p]
                     mfree[j] = 0
                     mbfID[j] = p
                     if mpairID[j] >0
@@ -449,7 +455,7 @@ function MotorModelv01(outname::String,nmpp::Int,nmpw::Int,nmnn::Int,nf::Int,vp:
         end
 
       if sum(masingle)>0 #make tree if single motors are available for pairing
-        activetree = BruteTree([mxp[mID[masingle]] myp[mID[masingle]]]') #KDTree of active single motor
+        activetree = KDTree([mxp[mID[masingle]] myp[mID[masingle]]]') #KDTree of active single motor
         treedex = mID[masingle]
       end
 
