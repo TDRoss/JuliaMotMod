@@ -1,5 +1,4 @@
 using MAT
-using VML
 using NearestNeighbors
 
 
@@ -39,20 +38,21 @@ preform=argvec[16]::Bool
 
 
   #Initialize costants
-  dt = 0.25f0*10^(-4.0f0); #time step size (seconds)
-  skiptime = Int(floor(5*10^(-2.)/dt)) #time between collision detection events
-  totaltime = 20.0f0  #Duration of simulation  (seconds)
+  dt = 2.0f0*10^(-5.0f0) #time step size (seconds)
+  skiptime = Int(floor(5*10^(-2.)/dt)) #time steps between collision detection events
+  skdt = dt*skiptime #time between collision detection events
+  totaltime = 80.0f0  #Duration of simulation  (seconds)
   iters = dt:dt:totaltime #range of simulation
 
   fs = 5 #stall force (pN)
-  ks = 0.01f0 #spring constant (pN/nm)
+  ks = 0.005f0 #spring constant (pN/nm)
   fdragll = 10^-5.0f0 #parallel drag on filament
   fdragt = 2*10^-5.0f0 #orthogonal drag on filament
   fdragr = 2*10^2.0f0 # rotational drag on filament
   hflen = flen/2.0f0; #half the filament length
   filtdiff = sqrt(2*dt*2*10^5.0f0) #translational filament diffusion coefficent
   filrdiff = sqrt(2*dt*2*10^-2.0f0) #rotational filament diffusion coefficent
-  mtdiff = sqrt(2*dt*4*10^6.0f0) #motor translational diffusion coefficent
+  mtdiff = sqrt(2*skdt*4*10^6.0f0) #motor translational diffusion coefficent
   offrate = skiptime*dt*koff
   onrate = skiptime*dt*kon
 
@@ -107,6 +107,7 @@ preform=argvec[16]::Bool
   mdfc = similar(mxp) #distance from bound filament center
   moptype = similar(activetimer) #opto type of motor, determines which motor pairs form
   mspeed = similar(mxp) #speed of motor, sign indicates plus or minus directed
+  mlim = similar(mxp) #stopping point on filament for motortype
 
   #make motors start out in pairs
   pc = 1
@@ -127,17 +128,20 @@ preform=argvec[16]::Bool
     if j<=nmpp
       moptype[j] = 1+iseven(j)
       mspeed[j] = vp*dt
+      mlim[j] = hflen
     elseif j<=(nmpp + nmpw)
       moptype[j] = 3+iseven(j)
       mspeed[j] = dt*vp*iseven(j)+vw*isodd(j)*dt
+      mlim[j] = sign(mspeed[j])*hflen
     elseif j<=nm
       moptype[j] = 5+iseven(j)
       mspeed[j] = vn*dt
+      mlim[j] = -hflen
     end
   end
-  moptype[1:nmpp] = repeat([1,2],inner=Int(nmpp/2))
-  moptype[(1+nmpp):(nmpp+nmpw)] = repeat([3,4],inner=Int(nmpw/2))
-  moptype[(1+nmpp):(nmpp+nmpw)] = repeat([3,4],inner=Int(nmpw/2))
+  # moptype[1:nmpp] = repeat([1,2],inner=Int(nmpp/2))
+  # moptype[(1+nmpp):(nmpp+nmpw)] = repeat([3,4],inner=Int(nmpw/2))
+  # moptype[(1+nmpp):(nmpp+nmpw)] = repeat([3,4],inner=Int(nmpw/2))
 
   # #For testing motor pair on two filaments
   # mxp = [0.0,70.71]
@@ -189,9 +193,13 @@ preform=argvec[16]::Bool
   #holds stochastic forces applied to filaments
   randforce = zeros(Float32, 3)
   #Active region positions
+  actreg = [-2.0f0*10^4 0.0f0 -2.0f0*10^4 2.0f0*10^4; 0.0f0 2.0f0*10^4 -10.0f0*10^4 10.0f0*10^4 ]
+  # actreg = [-5.0f0*10^4 5.0f0*10^4 -5.0f0*10^4 5.0f0*10^4;-5.0f0*10^4 5.0f0*10^4 -5.0f0*10^4 5.0f0*10^4]
+  # actreg = [-5.0*10^4 -0.5*10^4 -0.5*10^4 0.5*10^4; 0.5*10^4 5.0*10^4 -0.5*10^4 0.5*10^4]  #xs xe ys ye; region 2
+  # linkreg = [-5.0*10^4 5.0*10^4 -0.25*10^4 0.25*10^4]
   # actreg = [-5.0*10^4 -0.5*10^4 -5.0*10^4 5.0*10^4; 0.5*10^4 5.0*10^4 -5.0*10^4 5.0*10^4]  #xs xe ys ye; region 2
   # linkreg = [-5.0*10^4 5.0*10^4 -0.5*10^4 0.5*10^4]
-  actreg = [-10*flen 10*flen -beamh/2.0f0 beamh/2.0f0]
+  # actreg = [-10*flen 10*flen -beamh/2.0f0 beamh/2.0f0]
 
   pairdiff = 0.0f0 #For calculating diffusion on free motor pairs
   boundone = 0 #holds the id of the bound motor in a motor pair
@@ -213,7 +221,7 @@ preform=argvec[16]::Bool
     forceonfils .= 0.0f0
     forceonmots .= 0.0f0
 
-     @inbounds for j in 1:numpairs #Calculate net forces on filaments due to motor pair springs
+    @inbounds for j in 1:numpairs #Calculate net forces on filaments due to motor pair springs
       if mpairs[j,3] >0 && mpairs[j,4] > 0 #If motor pairs are both filament bound
 
         #Get motor and filament IDs
@@ -293,79 +301,99 @@ preform=argvec[16]::Bool
 
     #Apply forces on motors
      @inbounds for j in 1:nm
-      if mpairID[j] == 0 #single motors
-        if mbfID[j] == 0 #not bound to filament
-          mxp[j] += Float32(randn())*mtdiff
-          myp[j] += Float32(randn())*mtdiff
-          #reflect motor back if out of bounds
-          if abs(mxp[j]) > maxmotloc
-            mxp[j] = sign(mxp[j])*maxmotloc*2.0f0 - mxp[j]
+      curmpID = mpairID[j]
+      curfID = mbfID[j]
+      if curmpID == 0 #single motors
+        if curfID != 0  # bound to filament
+          if (mspeed[j] >= 0 && mdfc[j] < hflen) || (mspeed[j]<0 && mdfc[j] > -hflen)
+            mdfc[j]+= mspeed[j]
+          else
+            mdfc[j] = mlim[j]
           end
-          if abs(myp[j]) > maxmotloc
-            myp[j] = sign(myp[j])*maxmotloc*2.0f0 - myp[j]
-          end
-        else #bound to filament
-          mdfc[j]+= mspeed[j]
-          mxp[j] = mdfc[j]*filcos[mbfID[j]]+filcxp[mbfID[j]]
-          myp[j] = mdfc[j]*filsin[mbfID[j]]+filcyp[mbfID[j]]
+          mxp[j] = mdfc[j]*filcos[curfID]+filcxp[curfID]
+          myp[j] = mdfc[j]*filsin[curfID]+filcyp[curfID]
         end
       else #paired motor
-        if mpairs[mpairID[j],1] == j && mpairs[mpairID[j],3] == 0 && mpairs[mpairID[j],4] == 0 #both motors not bound to filament
-          pairtwoID = mpairs[mpairID[j],2]
-          pairdiff = randn(Float32)*mtdiff
-          mxp[j]+= pairdiff
-          mxp[pairtwoID]+= pairdiff
-          pairdiff = randn(Float32)*mtdiff
-          myp[j]+= pairdiff
-          myp[pairtwoID]+= pairdiff
-          #reflect out of bound motor pairs
-          if abs(mxp[j]) > maxmotloc
-            mpdist = 2.0f0*(sign(mxp[j])*maxmotloc - mxp[j])
-            mxp[j] += mpdist
-            mxp[pairtwoID] += mpdist
-          end
-          if abs(myp[j]) > maxmotloc
-            mpdist = 2.0f0*(sign(myp[j])*maxmotloc - myp[j])
-            myp[j] += mpdist
-            myp[pairtwoID] += mpdist
-          end
-        elseif mpairs[mpairID[j],1] == j && xor(mpairs[mpairID[j],3] == 0, mpairs[mpairID[j],4] == 0) #one motor is bound
-          paironeID = mpairs[mpairID[j],1]
-          pairtwoID = mpairs[mpairID[j],2]
-          if mpairs[mpairID[j],3]>0
-            boundone = mpairs[mpairID[j],1]
+        if mpairs[curmpID,1] == j && xor(mpairs[curmpID,3] == 0, mpairs[curmpID,4] == 0) #one motor is bound
+          paironeID = mpairs[curmpID,1]
+          pairtwoID = mpairs[curmpID,2]
+          if mpairs[curmpID,3]>0
+            boundone = mpairs[curmpID,1]
           else
-            boundone = mpairs[mpairID[j],2]
+            boundone = mpairs[curmpID,2]
           end
-          mdfc[boundone] += mspeed[boundone]
+          if (mspeed[boundone] >= 0 && mdfc[boundone] < hflen) || (mspeed[boundone]<0 && mdfc[boundone] > -hflen)
+            mdfc[boundone] += mspeed[boundone]
+          else
+            mdfc[boundone] = mlim[j]
+          end
           pairdiff = mdfc[boundone]*filcos[mbfID[boundone]]+filcxp[mbfID[boundone]]-mxp[boundone]
           mxp[paironeID]+= pairdiff
           mxp[pairtwoID]+= pairdiff
           pairdiff = mdfc[boundone]*filsin[mbfID[boundone]]+filcyp[mbfID[boundone]]-myp[boundone]
           myp[paironeID]+= pairdiff
           myp[pairtwoID]+= pairdiff
-        elseif   mpairs[mpairID[j],3] >0 && mpairs[mpairID[j],4] >0  #both motors in pair bound to filament
+        elseif (mpairs[curmpID,3] >0) && (mpairs[curmpID,4] >0)  #both motors in pair bound to filament
           if forceonmots[j] < fs
-            mdfc[j]+= mspeed[j]*(1-forceonmots[j]/fs)
+            if (mspeed[j] >= 0 && mdfc[j] < hflen) || (mspeed[j]<0 && mdfc[j] > -hflen)
+              mdfc[j]+= mspeed[j]*(1-forceonmots[j]/fs)
+            else
+              mdfc[j] = mlim[j]
+            end
           end
-          mxp[j] = mdfc[j]*filcos[mbfID[j]]+filcxp[mbfID[j]]
-          myp[j] = mdfc[j]*filsin[mbfID[j]]+filcyp[mbfID[j]]
+          mxp[j] = mdfc[j]*filcos[curfID]+filcxp[curfID]
+          myp[j] = mdfc[j]*filsin[curfID]+filcyp[curfID]
         end
       end
       if tc == steptrigger #update motor history array
         mothist[hc,j,1] = mxp[j]
         mothist[hc,j,2] = myp[j]
-        mothist[hc,j,3] = mbfID[j]
+        mothist[hc,j,3] = curfID
       end
     end
 
       if skc==skiptime
         @inbounds for j in 1:nm
+          if mpairID[j] == 0 #single motors
+            if mbfID[j] == 0 #not bound to filament
+              mxp[j] += Float32(randn())*mtdiff
+              myp[j] += Float32(randn())*mtdiff
+              #reflect motor back if out of bounds
+              if abs(mxp[j]) > maxmotloc
+                mxp[j] = sign(mxp[j])*maxmotloc*2.0f0 - mxp[j]
+              end
+              if abs(myp[j]) > maxmotloc
+                myp[j] = sign(myp[j])*maxmotloc*2.0f0 - myp[j]
+              end
+            end
+          else  #paired motors
+            if mpairs[mpairID[j],1] == j && mpairs[mpairID[j],3] == 0 && mpairs[mpairID[j],4] == 0 #both motors not bound to filament
+              pairtwoID = mpairs[mpairID[j],2]
+              pairdiff = randn(Float32)*mtdiff
+              mxp[j]+= pairdiff
+              mxp[pairtwoID]+= pairdiff
+              pairdiff = randn(Float32)*mtdiff
+              myp[j]+= pairdiff
+              myp[pairtwoID]+= pairdiff
+              #reflect out of bound motor pairs
+              if abs(mxp[j]) > maxmotloc
+                mpdist = 2.0f0*(sign(mxp[j])*maxmotloc - mxp[j])
+                mxp[j] += mpdist
+                mxp[pairtwoID] += mpdist
+              end
+              if abs(myp[j]) > maxmotloc
+                mpdist = 2.0f0*(sign(myp[j])*maxmotloc - myp[j])
+                myp[j] += mpdist
+                myp[pairtwoID] += mpdist
+              end
+            end
+          end
           if activetimer[j] >0 #Count down active timer for motor pairing
             activetimer[j] -= 1
           end
           #Check if motor is in active region
-          if (actreg[1]<mxp[j]<actreg[2] && actreg[3]<myp[j]<actreg[4])
+          if minrange(mxp[j],myp[j],actreg[1,:],[1,2],moptype[j],t,0.0f0) || minrange(mxp[j],myp[j],actreg[2,:],[5,6],moptype[j],t,15.0f0)
+          #if (actreg[1,1]<mxp[j]<actreg[1,2] && actreg[1,3]<myp[j]<actreg[1,4]) || (actreg[2,1]<mxp[j]<actreg[2,2] && actreg[2,3]<myp[j]<actreg[2,4]) || (t>40 && (linkreg[1]<mxp[j]<linkreg[2] && linkreg[3]<myp[j]<linkreg[4]))
             if rand(Float32)<intensity #probability of motor being activated is proportional to light intensity
               activetimer[j] = timeactive
               if mpairID[j] == 0
@@ -453,7 +481,7 @@ preform=argvec[16]::Bool
           end
 
           if !mfree[j] #motors that are filament bound, see if they unbind
-            if mdfc[j] >= mdcoff || (rand(Float32) < offrate) #motors at end of filament fall off
+            if (rand(Float32) < offrate) #motors at end of filament fall off
               mfree[j] = 1
               mbfID[j] = 0
               if mpairID[j] >0
@@ -528,6 +556,7 @@ preform=argvec[16]::Bool
     write(file,"filhist",filhist)
     write(file,"mothist",mothist)
     write(file,"forcehist",forcehist)
+    write(file,"moptype",moptype)
     close(file)
     # return mothist, filhist
 end
@@ -547,4 +576,9 @@ end
   end
 
   return t1,t2
+end
+
+function minrange(mxp::Float32,myp::Float32,actreg::Vector{Float32},mtypes::Vector{Int},mtype::Int,t::Float32,acttime::Float32)
+res = t > acttime && (actreg[1]<mxp<actreg[2]) && (actreg[3]<myp<actreg[4]) && (mtype == mtypes[1] || mtype == mtypes[2])
+return res
 end
