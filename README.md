@@ -1,5 +1,5 @@
 # JuliaMotMod
-Simulation of light activated microtubule motor system
+Simulation of light activated microtubule motor system. This was made using a pre-1.0 version of Julia and thus may no longer be functional.
 
 Example input Standard MotMod: 
 MotorModelv03(["Filbounce.mat",50000,0,0,4000,200.0f0,0.0f0,-200.0f0,10000.0f0,100.0f0,100000.0f0,0.3f0,4.0f0,1.0f0,1.0f0,true])
